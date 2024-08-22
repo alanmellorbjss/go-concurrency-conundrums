@@ -434,10 +434,10 @@ import (
 // example sigma(3) = 3 + 2 + 1 = 6
 func sigma(number int) int {
 	if number == 1 {
-		return 1
+		return 1 // recursive exit
 	}
 
-	res := number + sigma(number-1)
+	res := number + sigma(number-1) // recursive call
 	fmt.Println(number, res)
 	return res
 }
@@ -499,17 +499,71 @@ The above exaples have all been [embarrassingly parallel](https://en.wikipedia.o
 
 These are where the concurrent pieces are completely independent. They do not need to work together. No need to wait for one another, no need to share results with one another.
 
-It's like having three coffee shop baristas making three separate coffess, with one coffee machine each. Or perhaps Dave does the weekly shop while Sue watches TV - two activities that can be done at the same time, without being linked in any way.
+It's like having three coffee shop baristas making three separate coffees, with a separate coffee maker each. Or perhaps Dave does the weekly shop while Sue watches TV - two activities that can be done at the same time, without being linked in any way.
 
 To move on to our next major topic, we need to consider problems that are not so easy to parallelise.
 
 ## Channels: Communicating data between goroutines
 
-For problems that are not _embarrasingly parallel_, by definition, we need to pass data between goroutines. We may also need to synchronise execution between goroutines. A consumer of some data will need to wait for a producer to supply it. until then, the consumer is blocked and can do no useful work.
+For problems that are not _embarrasingly parallel_, by definition, we need to pass synchronise activity goroutines. We may need to synchronise execution between goroutines. Or we may need to share data. A consumer of some data will need to wait for a producer to supply it. Until then, the consumer is blocked and can do no useful work.
 
 Channels are the preferred way for a Go program to communicate between different goroutines.
 
-TODO example
+## Simple channel example
+
+Let's start easy:
+
+```golang
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func produce(ch chan string) {
+	ch <- "Hello"
+}
+
+func consume(ch chan string) {
+	message := <-ch
+	fmt.Println(message)
+}
+
+func main() {
+	ch := make(chan string, 1)
+	go consume(ch)
+	go produce(ch)
+
+	time.Sleep(time.Second)
+}
+```
+
+Run this code [here](https://goplay.tools/snippet/Xo7aUYGfjq_9)
+
+You should see the rather underwhelming output of
+
+```
+OUTPUT
+Hello
+```
+
+What is perhaps more useful is _how_ this happened:
+
+- main() was running inside goroutine 1, as always
+- two new goroutines were created
+- function `produce` was scheduled to run inside goroutine 3
+- function `consume` was scheduled to run inside goroutine 2
+- The two new goroutines were connected by a _channel_, variable `ch`
+- That channel could hold 1 value, a string
+- `produce` wrote the string `"Hello"` into the channel
+- `consume` read the string from the channel and printed it out
+
+This code demonstrates how convenient channels are to pass data from one goroutine to another.
+
+> Channels are guaranteed to be a safe way of passing data bewteen goroutines. The data will not be corrupted during transit.
+
+Seems almost too easy, right?
 
 ## Channel conundrum: deadlock
 
@@ -525,7 +579,7 @@ func main() {
 }
 ```
 
-> make(chan string) creates a channel, that can transport string values between goroutines. This syntax creates a maximum capacity of one value in the channel.
+> make(chan string) creates a channel, that can transport string values between goroutines. This syntax creates a maximum capacity of zero values in the channel. That means that the only time a value can be placed into this channel is when another goroutine is waiting and ready to receive it.
 
 :question: What will go wrong when we run this code?
 
@@ -660,17 +714,93 @@ This approach is excellent for handling bursts of traffic and work queues.
 
 But what happens when we try to write once the queue is full?
 
-#### Blocking
+#### Blocking and channels
 
 To understand what happens, we need to understand the concept of _blocking_.
 
 > _Blocking_: Where a goroutine has to wait for something to happen elsewhere. It is blocked. the Go scheduler hands control to something that is not blocked.
 
-- explain sequential order in goroutine
-- explain some work has to wait (example)
-- explain go scheduler does not waste time
-- explain hands control to un blocked thing
-- if everything is blocked: dead lock, as we saw
+To understand how channels cause gorutines to be blocked, let's look at this code:
+
+```go
+package main
+
+import (
+	"fmt"
+)
+
+func produce(ch chan string) {
+	ch <- "First"
+	ch <- "Second"
+	ch <- "Third"
+	ch <- "Fourth"
+	ch <- "Fifth"
+	ch <- "STOP"
+}
+
+func consume(ch chan string) {
+	for {
+		message := <-ch
+
+		if message == "STOP" {
+			return
+		}
+
+		fmt.Println(message)
+	}
+}
+
+func main() {
+	ch := make(chan string, 3)
+	go produce(ch)
+	consume(ch)
+
+	fmt.Println("Finished")
+}
+```
+
+Run this code [here](https://goplay.tools/snippet/HydDHyeaA8e)
+
+:question: How many goroutines are in this code?
+:question: Which goroutine does `consume` run inside?
+:question: How many string values can channel `ch` store?
+:question: Why do we not see `STOP` in the output?
+:questions: Why do we use STOP in this example?
+:questions: Why do we not need `time.Sleep(time.Second)` in this code?
+
+There are a few things to unpack in this code.
+
+The first thing is that we are running `consume()` in goroutine 1, the same goroutine that runs `main()`. The `consume()` code is an infinite loop that we exit on receipt of the message `STOP`.
+
+The code is otherwise similar to the earlier example. Function`produce()` writes string values to the channel passed in as a parameter. This channel is shared with function 'consume()' which also accepts the channel as a parameter. `consume()` will read values off the channel one at a time and print them out - unless they are the _sentinel value_ of `STOP`. This value causes `consume()` to return. That returns control to `main()`, which prints `Finished` and exits. That ends the program.
+
+### Blcoking and the Go Scheduler on channel full
+
+One thing we cannot see in this code is very important: how the scheduler divides up work.
+
+- `produce()` will run at some point, possibly in short time-slices
+- `produce()` will write values onto the channel
+- Values are written in sequence First, Second, Third and so on
+- Once the `main()` function reaches the call to `consume()` it will immediatley call that function (there is no new goroutine created; no `go` keyword was used)
+- The for loop in consume will read messages off the queue, one at a time
+- The Go scheduler _may_ decide to use a short time-slice for consume, giving it time to read only one or two values. Or it may give a long slice
+
+What happens next is interesting:
+
+- `produce()` attempts to write values to the channel, while `consume()` _may_ be reading them (we cannot know the exact order)
+- At some point, the channel will be _full_: it will contain three values awaiting reading
+- If `produce()` attempts to write to the full channel, it will _block_
+
+Once a channel is full, no more writes can happen. Instead, the gorutine repsonsible for running that code is blocked. This returns control to the Go Scheduler, which must decide what to do:
+
+- If other goroutines are paused but able to run, it will select one at random and resume its execution
+- If no gorutine is able to run, we get a panic: _deadlock_
+
+If `produce()` is blocked, waiting for space in the channel, the Go Scheduler will resume execution of `consume()` in this code example. This will cause reads of the values on the channel. This in turn creates space for more values on the channel.
+
+the Go Scheduler will then be able to resume execution of `produce()`. This will resume execution _from the point of the write to the channel which was blocked_. The write will succeed this time.
+
+We can see that this behaviour maximises throughput in the CPU core. If some code needs to wait - like `produce()` waiting for space in the channel - then other code can be executed. The whole program is not waiting around; something can always be executing. The job of the Go Scheduler is to decide which code should be running.
 
 #### Blocking and buffered channels
 
