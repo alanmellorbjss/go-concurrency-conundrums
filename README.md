@@ -1,38 +1,45 @@
 # Go Concurrency Conundrums
 
-Goroutines and channels are the flagship features of the Go language. Providing an alternative to threads, these features simplify concurrent programming while making best use of available CPU cores.
+Goroutines and channels are the flagship features of the Go language. Providing an alternative to threads, these features simplify concurrent programming while making best use of available CPU resources.
 
 _Simplified_ is not quite the same as _simple_, however.
 
 The following exercises are a mix of ideas that work, and _conundrums_ - puzzles that don't work, for you to figure out why.
 
-## Things you need to know
+## Things you need to know before you start
 
 Before you start, let's list a few facts about goroutines:
 
 ### goroutine 1 is privileged
 
 - There is always at least one goroutine called _goroutine 1_.
-- goroutine 1 is used to run the main() function
+- goroutine 1 is used to run the `main()` function
 - Once the code inside goroutine 1 completes, goroutine 1 is terminated
-
-### Concurrent sequential processes (CSP)
-
-- Within any single goroutine, execution of code is _sequential_
-- Between goroutines, no guarantees exist _whatsoever_ about relative ordering of the sequential code.
 
 ### Termination of goroutines
 
-- Once goroutine 1 is terminated _all_ other goroutines are immediately terminated
 - When a goroutine terminates, no further code is executed in that goroutine
+- Once goroutine 1 is terminated _all_ other goroutines are immediately terminated
 - There is no concept of "waiting" for code to finish before termination. It just stops.
+
+### Communicating sequential processes (CSP)
+
+- A goroutine is the Go version of a [Communicating Sequential Process](https://en.wikipedia.org/wiki/Communicating_sequential_processes#:~:text=CSP%20was%20first%20described%20in,a%20secure%20e%2Dcommerce%20system.)
+- Within any single goroutine, execution of code is _sequential_
+- Between goroutines, no guarantees exist _whatsoever_ about relative ordering of the sequential code.
+- Goroutines may communicate with each other safely by using _channels_
 
 ### Go Scheduler overview
 
 - Is like a kind of operating system withing the Go language
+- Many (1000s-100,000s) goroutines may exist
+- goroutines are _lightweight_ in terms of memory/processor overhead
+
+### Go Scheduler rules
+
 - The scheduler decides when, or even if, it should execute code in a goroutine
 - The scheduler may choose to run another goroutine _at any time_
-- The scheduler maps goroutines onto native operating system threads
+- The scheduler maps manygoroutines onto native operating system threads
 - The scheduler maps goroutines onto CPU cores, making full use of multicore processors
 - The scheduler follows rules for what runs, when, and for how long
 - You might not agree with the scheduler's decisions. Nobody cares. You cannot affect the rules. _This hugely affects your ability and intuition about Go concurrency_.
@@ -40,14 +47,20 @@ Before you start, let's list a few facts about goroutines:
 - Each goroutine tracks which instruction was running last. Execution resumes from where it left off
 - The instruction last running does not necessarily align with any Go source code. Source lines give rise to multiple processor instructions. The scheduler may switch to another goroutine _at any time_
 
-### Go Scheduler rules
+### Time slicing
 
+- The Go Scheduler will allocate a time slice for a goroutine to run
+- Do not assume the code you want to complete as a single block will complete inside a time slice
 - Code within a goroutine may run for a long, uninterrupted piece of time
 - Code within a goroutine may run for a short time with frequent interruptions
-- No code may be running _at all_ within the scheduler
+- No code may be running _at all_ within the scheduler (waiting, or deadlock)
+- There is no guarantee any section of code will be run completely inside an allocation of time by the scheduler
+
+### Blocking
+
 - When code is waiting for something outside of its own goroutine to happen, we call this _blocking_
 - When a goroutine blocks, the scheduler will decide if some other goroutine can be given a turn to run
-- There is no guarantee any section of code will be run completely inside an allocation of time by the scheduler
+- _deadlock_ occurs when no goroutine is able to run. A `panic' occurs inside the Go scheduler
 
 If all that sounds like it makes code hard to think about, and little bits of your brain start to dribble from your ears - _congratulations!_ You probably understand the depths of what you're about to get into.
 
@@ -228,7 +241,7 @@ B Second
 B Third
 ```
 
-We can see that in each case, the output is strictly sequential: First, Second, Third.
+We can see that in each case, the output within each goroutine is strictly sequential: First, Second, Third.
 
 In this run, the Go scheduler had called the function in goroutine "A" and allowed it to run all three sequential statements. Then it decided to hand control to goroutine "C" and allow that to complete all sequential statements. Then the same happens for "B".
 
@@ -243,7 +256,7 @@ A Second
 B First
 B Second
 B Third
-**A Third**
+** A Third **
 C First
 C Second
 C Third
@@ -251,25 +264,103 @@ C Third
 
 Can you see the difference?
 
-The Go scheduler started off by running goroutine "A". That executed our `showSequentialOperations()` function, which worked in sequence. _But_ the Go Scheduler then decided enough was enough. Goroutine "A" was _blocked_ by the scheduler. It decided to give some execution time to goroutine "B".
+The Go scheduler started off by running goroutine "A". That executed our `showSequentialOperations()` function, which worked in sequence. _But_ the Go Scheduler then decided enough was enough. Goroutine "A" was _paused_ by the scheduler. It decided to give some execution time to goroutine "B".
 
-Why? _ Because it can_. Those are the rules of the scheduler. _You may not agree with them, remember? Nobody cares, rememeber?_
+Why? _Because it can_. Those are the rules of the scheduler. _You may not agree with them, remember? Nobody cares, remember?_
 
-In this run "B" completes all three lines of code. The function returns and hands back scontrol to the Go scheduler. This now decides to _unblock_ (i.e. _resume execution_ of) gorutine "A".
+In this run, "B" completes all three lines of code. The function returns and hands back scontrol to the Go scheduler. This now decides to _resume execution_ of goroutine "A".
 
 Because execution in any goroutine is sequential, the function resumes from where it left off. It had printed First anmd Second. So now it will resume to print Third.
 
 > This is hugely important! Execution is sequential and resumes where it left off (within a goroutine)
 
-### Goroutines preserve internal state of functions
+### Conundrum: One function, many goroutines
+
+Here is one function being run inside multiple goroutines. Pay attention to the local variable 'i', as we are going to think more deeply about what it does:
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func count(name string) {
+	for i := 1; i <= 10; i++ {
+		fmt.Println(name, i)
+	}
+}
+
+func main() {
+	go count("B")
+	go count("C")
+	go count("A")
+
+	time.Sleep(time.Second)
+}
+```
+
+Run this code [here](https://goplay.tools/snippet/G5yylNL6oNC)
+
+During one run, the following output happened:
+
+```
+B 1
+B 2
+B 3
+B 4
+B 5
+B 6
+B 7
+B 8
+B 9
+B 10
+** A 1 **
+** C 1 **
+** A 2 **
+A 3
+A 4
+A 5
+A 6
+A 7
+A 8
+A 9
+A 10
+** C 2 **
+C 3
+C 4
+C 5
+C 6
+C 7
+C 8
+C 9
+C 10
+```
+
+You'll notice that the same counting loop code is run inside three different goroutines.
+
+- The value of `i` is being reused by each one of the goroutines
+- Each goroutine may be interrupted by the Go Scheduler at any time
+- The value of `i` is not corrupted when goroutine C interruts goroutine A
+
+:question: How does that work? Why is `i` not corrupted?
+
+### The scheduler takes snapshots of local variables and current instruction
+
+Goroutines can be paused and resumed by the Go Scheduler. What the above code shows is that a _snapshot_ of local variables and the currently executing program instructions are preserved for every goroutine. When the Go Scheduler resumes execution, it restores that snashot.
+
+> THere is not one single copy of local variable `i` in this code: _there is one per goroutine_
+
+This messes with our mental model of how code executes when there is no concurrency. But it makes using concurrency easier, once you get used to it.
 
 ## Hate your life: recursive concurrent functions
 
-We've had too much fun already. Let's regret our life choices and look into recursive functions, running concurrently.
+We've had too much fun already. Let's slowly regret our life choices and look into recursive functions, running concurrently.
 
 It goes without saying, these are hard to understand.
 
-Let's start off with a recursive function `sigma(n)` that adds up all the numbers below it. So `sigma(3)` will work out 3 + 2 + 1, which is 6. `sigma(10)` works out to be 55.
+Let's start off with a recursive function `sigma(n)` that adds up all the numbers (positive non-zero integers) below it. So `sigma(3)` will work out 3 + 2 + 1, which is 6. `sigma(10)` works out to be 55.
 
 We will call it _without_ concurrency first, three times:
 
@@ -386,7 +477,7 @@ OUTPUT
 
 If you run this a few times, you can see the Go Scheduler deciding to slice up the calculation differently each time.
 
-We can see that the three function calls are running concurrently. Each recursive function gets allocated a slice of time to run, then the Go scheduler blocks it and unblocks another one.
+We can see that the three function calls are running concurrently. Each recursive function gets allocated a slice of time to run, then the Go scheduler blocks it and unblocks another one. In this example, we see that sigma(3) processing has been interrupted by sigma(6) processing.
 
 Notice that the local variables are preserved. Each goroutine keeps track of the local varibale values in functions.
 
@@ -396,7 +487,7 @@ It is best to think of the Go Scheduler as having made a "copy" of our function 
 
 It's actually just a stack; each time a goroutine is unblocked, the relevant gorutine information stack is consulted for where the code left off last. This includes execution point and all local variables, in all of the call stack.
 
-> One function - called from ultiple goroutines - Go scheduler tracks and switches out local variable values for us
+> One function - called from multiple goroutines - Go scheduler tracks and switches out local variable values for us
 
 Have a nice, hot cup of tea! This is challenging to think about.
 
@@ -404,17 +495,25 @@ Have a nice, hot cup of tea! This is challenging to think about.
 
 ## Embarrasingly parallel - multiple unconnected goroutines
 
-TODO example
+The above exaples have all been [embarrassingly parallel](https://en.wikipedia.org/wiki/Embarrassingly_parallel) problems.
+
+These are where the concurrent pieces are completely independent. They do not need to work together. No need to wait for one another, no need to share results with one another.
+
+It's like having three coffee shop baristas making three separate coffess, with one coffee machine each. Or perhaps Dave does the weekly shop while Sue watches TV - two activities that can be done at the same time, without being linked in any way.
+
+To move on to our next major topic, we need to consider problems that are not so easy to parallelise.
 
 ## Channels: Communicating data between goroutines
+
+For problems that are not _embarrasingly parallel_, by definition, we need to pass data between goroutines. We may also need to synchronise execution between goroutines. A consumer of some data will need to wait for a producer to supply it. until then, the consumer is blocked and can do no useful work.
+
+Channels are the preferred way for a Go program to communicate between different goroutines.
 
 TODO example
 
 ## Channel conundrum: deadlock
 
-Channels are the preferred way for a Go program to communicate between different goroutines.
-
-Here's an easy mistake to make:
+Here's an easy mistake to make with channels:
 
 ```go
 package main
