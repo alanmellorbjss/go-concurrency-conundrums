@@ -937,7 +937,7 @@ Once a channel is full, no more writes can happen. Instead, the gorutine repsons
 
 If `produce()` is blocked, waiting for space in the channel, the Go Scheduler will resume execution of `consume()` in this code example. This will cause reads of the values on the channel. This in turn creates space for more values on the channel.
 
-the Go Scheduler will then be able to resume execution of `produce()`. This will resume execution _from the point of the write to the channel which was blocked_. The write will succeed this time.
+The Go Scheduler will then be able to resume execution of `produce()`. This will resume execution _from the point of the write to the channel which was blocked_. The write will succeed this time.
 
 We can see that this behaviour maximises throughput in the CPU core. If some code needs to wait - like `produce()` waiting for space in the channel - then other code can be executed. The whole program is not waiting around; something can always be executing. The job of the Go Scheduler is to decide which code should be running.
 
@@ -966,3 +966,11 @@ In other lanaguages, such as Ada, this is called a _rendezvous_, as both reader 
 TODO
 
 ## Fan in: Reducers
+
+TODO
+
+# Further Reading
+
+- [Concurrency in Go, Cox-Buday](https://learning.oreilly.com/library/view/concurrency-in-go/9781491941294/)
+- [Designing Data-Intensive Applications, Kleppmann](https://learning.oreilly.com/videos/designing-data-intensive-applications/9781663728289/)
+- [Go by example](https://gobyexample.com/goroutines)
