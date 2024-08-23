@@ -82,7 +82,7 @@ func main() {
 }
 ```
 
-:question: How many goroutines does Hello World have?
+- :question: How many goroutines does Hello World have?
 
 We can find the answer by causing a [panic](https://go.dev/blog/defer-panic-and-recover):
 
@@ -137,12 +137,14 @@ func main() {
 
 Run the code [here](https://goplay.tools/snippet/4EpvTq-Vbsj)
 
-:question: What do you expect to see as output?
-:question: What did you actually see as output?
-:question: Why did that happen?
+- :question: What do you expect to see as output?
+- :question: What did you actually see as output?
+- :question: Why did that happen?
 
 > Hint 1: What happens when goroutine 1 terminates?
+>
 > Hint 2: After which line in `main()` will goroutine 1 terminate?
+>
 > Hint 3: Is there any guarantee that the new goroutine will run before goroutine 1 terminates?
 
 ### The go keyword requests a gorutine is created, nothing more
@@ -151,15 +153,42 @@ The answer to the above behaviour is that our `main()` function completed very q
 
 This means `main()` completes after that. Control is returned to the scheduler. goroutine 1 is terminated and _all other goroutines are terminated_. The `Println()` code never got the chance to run.
 
+> The 'go' keyword _does not execute_ the code after it. That happens later.
+
 ### Delaying goroutine 1 termination
 
 For the next few exercises, we will kludge our way around the problem by using `time.Sleep(time.Second)` at the end of `main()`. This causes a one second pause to happen before `main()` exits and goroutine 1 terminates. This gives time for other goroutines to do some work.
 
 > Using time.Sleep() is a terrible way to do this in production code!
 
-## Functions and goroutines
+## Running functions inside goroutines
 
-Often, we supply a regular function call after the `go` keyword. Once the goroutine is scheduled to begin, this function will be called. Once the function exits, the goroutine will be garbage collected (cleaned up; no longer exists).
+The code block after the `go` keyword is often a function call:
+
+```go
+func sayHello(name string) {
+    fmt.Println("Hello", name)
+}
+
+go sayHello("Alan")
+```
+
+The function
+
+- should not return any value
+- may accept zero or more local parameters.
+- (usually) )should not reference module-wide variables or global variables
+
+The `go` statement here has the following effect
+
+- The Go Scheduler will create a new goroutine
+- The function will be linked to that goroutine
+- The function as 'ready to run'
+- _The function will not start executing yet!_
+- At _some point later_, the Go Scheduler will begin execution of that function
+- The function will execute _sequentially_ ie lines run in the 'normal' order
+- The function will be paused and resumed whenever the Go Scheduler feels like it
+- Once the function exits, the goroutine will be terminated and removed automatically
 
 ### Sequential processes
 
@@ -188,8 +217,8 @@ func main() {
 
 Run the code several times, noting the output.
 
-:question: Is the output consistent?
-:question: Do the lines run in the order we expect?
+- :question: Is the output consistent?
+- :question: Do the lines run in the order we expect?
 
 Run this code [here](https://goplay.tools/snippet/AznVcIV7op4)
 
@@ -344,13 +373,13 @@ You'll notice that the same counting loop code is run inside three different gor
 - Each goroutine may be interrupted by the Go Scheduler at any time
 - The value of `i` is not corrupted when goroutine C interruts goroutine A
 
-:question: How does that work? Why is `i` not corrupted?
+- :question: How does that work? Why is `i` not corrupted?
 
 ### The scheduler takes snapshots of local variables and current instruction
 
 Goroutines can be paused and resumed by the Go Scheduler. What the above code shows is that a _snapshot_ of local variables and the currently executing program instructions are preserved for every goroutine. When the Go Scheduler resumes execution, it restores that snashot.
 
-> THere is not one single copy of local variable `i` in this code: _there is one per goroutine_
+> There is not one single copy of local variable `i` in this code: _there is one per goroutine_
 
 This messes with our mental model of how code executes when there is no concurrency. But it makes using concurrency easier, once you get used to it.
 
@@ -485,7 +514,9 @@ This is confusing at first. One function - many goroutines - many different valu
 
 It is best to think of the Go Scheduler as having made a "copy" of our function inside each goroutine.
 
-It's actually just a stack; each time a goroutine is unblocked, the relevant gorutine information stack is consulted for where the code left off last. This includes execution point and all local variables, in all of the call stack.
+> There is not one single copy of local variable `i` in this code: _there is one per recursive call per goroutine_
+
+It's actually just a [stack](https://github.com/bjssacademy/go-stacks-queues-sort-filter); each time a goroutine is unblocked, the relevant gorutine information stack is consulted for where the code left off last. This includes execution point and all local variables, in all of the call stack.
 
 > One function - called from multiple goroutines - Go scheduler tracks and switches out local variable values for us
 
@@ -550,12 +581,12 @@ Hello
 
 What is perhaps more useful is _how_ this happened:
 
-- main() was running inside goroutine 1, as always
+- `main()` was running inside goroutine 1, as always
 - two new goroutines were created
 - function `produce` was scheduled to run inside goroutine 3
 - function `consume` was scheduled to run inside goroutine 2
 - The two new goroutines were connected by a _channel_, variable `ch`
-- That channel could hold 1 value, a string
+- That channel could hold 1 value, of type string
 - `produce` wrote the string `"Hello"` into the channel
 - `consume` read the string from the channel and printed it out
 
@@ -714,13 +745,121 @@ This approach is excellent for handling bursts of traffic and work queues.
 
 But what happens when we try to write once the queue is full?
 
-#### Blocking and channels
+## Blocking and channels
 
 To understand what happens, we need to understand the concept of _blocking_.
 
-> _Blocking_: Where a goroutine has to wait for something to happen elsewhere. It is blocked. the Go scheduler hands control to something that is not blocked.
+> _Blocking_: Where a goroutine has to wait for something to happen in a _different goroutine_. It is blocked. The Go scheduler hands control to something that is not blocked.
 
-To understand how channels cause gorutines to be blocked, let's look at this code:
+### Channel blocking basics
+
+Here's code to create an unbuffered channel, write to it in one goroutine and read from it in the main goroutine 1. A 3 second delay happens before the write, so we can watch the action:
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func waitThenSend(ch chan string) {
+	fmt.Println("Started: goroutine 2")
+
+	// Wait for 3 seconds
+	time.Sleep(time.Second * 3)
+
+	// Send the cheery message. This will block if no reader is waiting
+	ch <- "Thank you for waiting! Sorry to block you so long"
+
+	// When goroutine2 becomes unblocked ...
+	fmt.Println("Resumed: goroutine 2 after the write succeeded")
+}
+
+func main() {
+	fmt.Println("Started: goroutine 1")
+
+	unbufferedChannel := make(chan string)
+
+	fmt.Println("Requesting new goroutine 2")
+	go waitThenSend(unbufferedChannel)
+
+	fmt.Println("<- operator is *blocked* until data written to channel...")
+	message := <-unbufferedChannel
+
+	fmt.Println(message)
+
+	fmt.Println("Program ends")
+
+	time.Sleep(time.Second)
+}
+```
+
+Run this code [here](https://goplay.tools/snippet/RG4tg1fPtCW)
+
+Initially, we see this output:
+
+```
+Started: goroutine 1
+Requesting new goroutine 2
+<- operator is *blocked* until data written to channel...
+Started: goroutine 2
+```
+
+After a 3 second pause, we see this output:
+
+```
+Started: goroutine 1
+Requesting new goroutine 2
+<- operator is *blocked* until data written to channel...
+Started: goroutine 2
+Resumed: goroutine 2 after the write succeeded
+Thank you for waiting! Sorry to block you so long
+Program ends
+```
+
+This is normal operation. But it's quite a good conundrum when we're learning:
+
+- :question: We saw "Started: goroutine 1" when we ran this, but no "Program ends". Why?
+- :question: We saw the line "<- operator is blocked" _before_ "Started: goroutine 2". Why? What does this mean about when finctions are run inside goroutines?
+- :question: The `main()` function was made to wait for 3 seconds, even though it had no time.Sleep() in it. What line caused main() to be paused? Why?
+
+The answers reveal much about goroutines.
+
+The key to it all is that the `main()` function requests a new goroutine is created, and then attempts to read a message from the channel. But there isn't any message there yet.
+
+What can we do if we want to read a value that isn;t there? Logically, we can either fail with a panic, or simply wait until a value is available. Wait is exactly what Go does.
+
+One option would be to wait using what's known as a _spin lock_. We could effectively have a loop inside main like this pseudo-code:
+
+```
+while (no message available) {
+    check for message available
+}
+```
+
+That would work, but it means the CPU is tied up doing nothing at all.
+
+Go does not do this. It's wasteful. Instead, the Go Scheduler _blocks_ that main goroutine, as it cannot proceed yet. It hands control over to any other available goroutines that can run.
+
+in this example, we requested a goroutine to be created, and told it to run the function `waitThenSend` in that goroutine. The Go Scheduler picks up on this, and starts running that function in that goroutine.
+
+That explains the order of the output "Starting: goroutine 2".
+
+The function code then writes the message to the unbuffered channel.
+
+As the channel has a capacity of zero, the Go Scheduler _must_ block the writing goroutine. It must find another goroutine that is actively waiting to read from this channel. Of course, it does - the main goroutine 1 already has a blocked read operation.
+
+The Go Scheduler resumes execution of goroutine 1. The read operation succeeds and pulls the message that was written. It then prints out the message.
+
+Meanwhile, the read has unblocked the write in goroutine 2. You can see that some time later, goroutine 2 resumes running code.
+
+The final `time.Sleep()` in `main()` keeps goroutine 1 open long enough that the Go Scheduler has time to resume execution of goroutine 2.
+
+- :question: If you delete the time.Sleep(time.Second) (line 36) from `main()` - what changes?
+- :quesion: Why did that change happen?
+
+### A further channel blocking experiment
 
 ```go
 package main
@@ -761,12 +900,12 @@ func main() {
 
 Run this code [here](https://goplay.tools/snippet/HydDHyeaA8e)
 
-:question: How many goroutines are in this code?
-:question: Which goroutine does `consume` run inside?
-:question: How many string values can channel `ch` store?
-:question: Why do we not see `STOP` in the output?
-:questions: Why do we use STOP in this example?
-:questions: Why do we not need `time.Sleep(time.Second)` in this code?
+- :question: How many goroutines are in this code?
+- :question: Which goroutine does `consume` run inside?
+- :question: How many string values can channel `ch` store?
+- :question: Why do we not see `STOP` in the output?
+- :questions: Why do we use STOP in this example?
+- :questions: Why do we not need `time.Sleep(time.Second)` in this code?
 
 There are a few things to unpack in this code.
 
@@ -774,7 +913,7 @@ The first thing is that we are running `consume()` in goroutine 1, the same goro
 
 The code is otherwise similar to the earlier example. Function`produce()` writes string values to the channel passed in as a parameter. This channel is shared with function 'consume()' which also accepts the channel as a parameter. `consume()` will read values off the channel one at a time and print them out - unless they are the _sentinel value_ of `STOP`. This value causes `consume()` to return. That returns control to `main()`, which prints `Finished` and exits. That ends the program.
 
-### Blcoking and the Go Scheduler on channel full
+### Blocking and the Go Scheduler on channel full
 
 One thing we cannot see in this code is very important: how the scheduler divides up work.
 
@@ -794,7 +933,7 @@ What happens next is interesting:
 Once a channel is full, no more writes can happen. Instead, the gorutine repsonsible for running that code is blocked. This returns control to the Go Scheduler, which must decide what to do:
 
 - If other goroutines are paused but able to run, it will select one at random and resume its execution
-- If no gorutine is able to run, we get a panic: _deadlock_
+- If no goroutine is able to run, we get a panic: _deadlock_
 
 If `produce()` is blocked, waiting for space in the channel, the Go Scheduler will resume execution of `consume()` in this code example. This will cause reads of the values on the channel. This in turn creates space for more values on the channel.
 
@@ -804,31 +943,23 @@ We can see that this behaviour maximises throughput in the CPU core. If some cod
 
 #### Blocking and buffered channels
 
-- explain writes do not block if space
-- writes do block if full
-- if write blocked and nothing reading: deadlock
+A buffered channel has capacity for one or more elements, held in a [FIFO Queue](https://github.com/bjssacademy/go-stacks-queues-sort-filter)
 
-#### Why the unbuffered channel caused deadlock
+- A buffered channel can be written to without blocking when it has space
+- A write to a buffered channel will block if the channel is full
+- A read from a buffered channel will block if the channel is empty
 
-TODO below apply knowledge to example
+#### Blocking and unbuffered channels
 
-In our first example above, we created an _unbuffered_ channel.
+An unbuffered channel is a channel that has a capacity of zero things.
 
-An unbuffered channel is a channel that has a maximum capcity of zero things.
+- An unbuffered channel can only be written to if another goroutine is ready to read from it
+- A write to a buffered channel will always block until a read occurs
+- A read from a buffered channel will always block until a write occurs
 
-#### Why the buffered channel caused deadlock
+This forms a strong synchronisation point between the read and write lines of code in two different goroutines.
 
-TODO below apply knowledge to example
-
-## Communicating data between two goroutines
-
-TODO
-
-## Unbuffered write before read conundrum
-
-Here's a fault you'll doubtless stumble into. Attempting to write before read on an unbuffered channel.
-
-TODO demo how read goroutine after write fails
+In other lanaguages, such as Ada, this is called a _rendezvous_, as both reader and writer must expressly operate at the same time.
 
 ## Fan out: worker pools
 
