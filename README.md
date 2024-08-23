@@ -972,5 +972,5 @@ TODO
 # Further Reading
 
 - [Concurrency in Go, Cox-Buday](https://learning.oreilly.com/library/view/concurrency-in-go/9781491941294/)
-- [Designing Data-Intensive Applications, Kleppmann](https://learning.oreilly.com/videos/designing-data-intensive-applications/9781663728289/)
+- [Designing Data-Intensive Applications, Kleppmann](https://learning.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/)
 - [Go by example](https://gobyexample.com/goroutines)
