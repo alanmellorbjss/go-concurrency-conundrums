@@ -67,7 +67,7 @@ Before we start, let's list a few rules used by the scheduler to make decisions:
 - Many (1000s-100,000s) goroutines may exist
 - goroutines are _lightweight_ in terms of memory/processor overhead
 
-### Go Scheduler rules
+### Which code runs next?
 
 - The scheduler decides when, or even if, it should execute code in a goroutine
 - The scheduler may choose to run another goroutine _at any time_
