@@ -1,4 +1,4 @@
-# Rules of Goroutines and the Go Scheduler
+# Understanding the Go Scheduler
 
 Concurrency in Go is handled by the Go scheduler. We write code that can be executed concurrently, and the Go scheduler decides which piece of code to run at any time.
 
