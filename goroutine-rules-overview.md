@@ -87,12 +87,6 @@ Before we start, let's list a few rules used by the scheduler to make decisions:
 - No code may be running _at all_ within the scheduler (waiting, or deadlock)
 - There is no guarantee any section of code will be run completely inside an allocation of time by the scheduler
 
-### Blocking
-
-- When code is waiting for something outside of its own goroutine to happen, we call this _blocking_
-- When a goroutine blocks, the scheduler will decide if some other goroutine can be given a turn to run
-- _deadlock_ occurs when no goroutine is able to run. A `panic' occurs inside the Go scheduler
-
 ## Why do we need to know this?
 
 If all that sounds like it makes code hard to think about, and little bits of your brain start to dribble from your ears - _congratulations!_ You probably understand the depths of what you're about to get into.
