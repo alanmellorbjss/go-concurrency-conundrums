@@ -14,4 +14,4 @@ Before we start, make sure you're familiar with the course material on concurren
 
 Next, let's review the rules governing how the Go Scheduler runs concurrent programs:
 
-[Goroutine rules overview >>](/goroutine-rules-overview.md)
+[Understanding the Go scheduler >>](/goroutine-rules-overview.md)
