@@ -42,6 +42,11 @@ Bad news. Deadlock is the situation where _all_ goroutines are blocked. The prog
 
 Before we start, let's list a few rules used by the scheduler to make decisions:
 
+### Goroutines are lightweight
+
+- Many (1000s-100,000s) goroutines may exist
+- goroutines are _lightweight_ in terms of memory/processor overhead
+
 ### Goroutine 1 is privileged
 
 - There is always at least one goroutine called _goroutine 1_.
@@ -60,12 +65,6 @@ Before we start, let's list a few rules used by the scheduler to make decisions:
 - Within any single goroutine, execution of code is _sequential_
 - Between goroutines, no guarantees exist _whatsoever_ about relative ordering of the sequential code.
 - Goroutines may communicate with each other safely by using _channels_
-
-### Go Scheduler overview
-
-- Is like a kind of operating system withing the Go language
-- Many (1000s-100,000s) goroutines may exist
-- goroutines are _lightweight_ in terms of memory/processor overhead
 
 ### Which code runs next?
 
