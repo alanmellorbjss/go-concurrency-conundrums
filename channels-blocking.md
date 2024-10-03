@@ -1,6 +1,6 @@
 # Channels: Communicating data between goroutines
 
-For problems that are not _embarrasingly parallel_, by definition, we need to pass synchronise activity goroutines. We may need to synchronise execution between goroutines. Or we may need to share data. A consumer of some data will need to wait for a producer to supply it. Until then, the consumer is blocked and can do no useful work.
+For problems that are not _embarrasingly parallel_, by definition, we need to synchronise activity between goroutines. We may need to synchronise execution between goroutines. Or we may need to share data. A consumer of some data will need to wait for a producer to supply it. Until then, the consumer is blocked and can do no useful work.
 
 Channels are the preferred way for a Go program to communicate between different goroutines.
 
